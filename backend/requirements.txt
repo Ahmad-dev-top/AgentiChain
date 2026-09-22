@@ -5,3 +5,6 @@ pydantic-settings>=2.6.0
 sqlalchemy[asyncio]>=2.0.36
 aiosqlite>=0.20.0
 greenlet>=3.1.0
+slither-analyzer>=0.10.4
+langgraph>=0.2.45
+eth-account>=0.13.0

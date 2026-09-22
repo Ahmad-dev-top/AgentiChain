@@ -40,7 +40,7 @@ class _AiWorkspaceState extends State<AiWorkspace> {
               const Text('Design & Verify Production Smart Contracts', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               const Text(
-                'Describe protocol mechanics in natural language. AgentiChain coordinates architect, Solidity, audit, Foundry, gas, and deploy agents. Live LangGraph is not wired yet; this run uses the FastAPI prototype orchestrator.',
+                'Describe protocol mechanics in natural language. The local pipeline drafts the spec, writes Solidity, audits, and tests. Pick a network in the header, then deploy to local Anvil or broadcast to that network.',
                 style: TextStyle(color: AcColors.muted, height: 1.4),
               ),
               const SizedBox(height: 16),
@@ -65,7 +65,7 @@ class _AiWorkspaceState extends State<AiWorkspace> {
                       decoration: const InputDecoration(hintText: 'Contract name (optional)'),
                     ),
                   ),
-                  const Text('Solidity 0.8.24 + OpenZeppelin v5', style: TextStyle(color: AcColors.muted, fontSize: 12)),
+                  const Text('Solidity 0.8.24', style: TextStyle(color: AcColors.muted, fontSize: 12)),
                   AcButton(
                     label: widget.state.processing ? 'Orchestrating' : 'Synthesize',
                     icon: Icons.auto_awesome,
@@ -100,6 +100,11 @@ class _AiWorkspaceState extends State<AiWorkspace> {
         Row(
           children: [
             const Expanded(child: SectionLabel('Agent traces')),
+            if (project?.orchestrationEngine != null && project!.orchestrationEngine.isNotEmpty)
+              StatusChip(
+                label: 'Agents ready',
+                color: AcColors.emerald,
+              ),
             TextButton(
               onPressed: () => widget.state.selectTab(WorkspaceTab.code),
               child: Text('Inspect code (${project?.contracts.length ?? 0} files)'),
@@ -301,18 +306,25 @@ class CodeWorkspace extends StatelessWidget {
 }
 
 class GraphWorkspace extends StatelessWidget {
-  const GraphWorkspace({super.key, required this.spec});
-  final ContractSpec spec;
+  const GraphWorkspace({super.key, required this.state});
+  final CommandCenterState state;
 
   @override
   Widget build(BuildContext context) {
+    final project = state.current;
+    final spec = project?.specJson;
+    if (spec == null) {
+      return const Center(child: Text('No specification loaded'));
+    }
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const PanelCard(
+        PanelCard(
           child: Text(
-            'Contract architecture is derived from the formal spec. This is a local graph, not a compiled AST.',
-            style: TextStyle(color: AcColors.muted),
+            project?.orchestrationEngine == 'langgraph'
+                ? 'Node path: ${(project?.nodePath.isEmpty ?? true) ? 'architect → solidity → auditor → foundry → gas' : project!.nodePath.join(' → ')}. Contract boxes below are from the spec, not a compiled AST.'
+                : 'Contract architecture is derived from the formal spec. This is a local graph, not a compiled AST.',
+            style: TextStyle(color: project?.orchestrationEngine == 'langgraph' ? AcColors.emerald : AcColors.muted),
           ),
         ),
         const SizedBox(height: 12),
@@ -427,10 +439,12 @@ class AuditWorkspace extends StatelessWidget {
           onPressed: state.autoPatch,
         ),
         const SizedBox(height: 12),
-        const PanelCard(
+        PanelCard(
           child: Text(
-            'This scanner is pattern-based. It is not Slither, Aderyn, Mythril, or SMTChecker.',
-            style: TextStyle(color: AcColors.amber),
+            audit?.live == true
+                ? 'Live security audit on this machine.'
+                : 'Local pattern scan until a live report is available.',
+            style: TextStyle(color: audit?.live == true ? AcColors.emerald : AcColors.amber),
           ),
         ),
         const SizedBox(height: 12),
@@ -502,7 +516,7 @@ class FoundryWorkspace extends StatelessWidget {
         PanelCard(
           child: Text(
             sim?.live == true
-                ? 'Live forge build/test on this machine. No RPC fork yet. ${sim?.forgeVersion ?? ''}'
+                ? 'Live forge build/test on this machine.'
                 : 'No live Foundry result yet. Run forge test against the current project sources.',
             style: TextStyle(color: sim?.live == true ? AcColors.emerald : AcColors.amber),
           ),
@@ -559,28 +573,64 @@ class DeployWorkspace extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final deployment = state.current?.deployment;
+    final public = deployment != null && deployment.chainId != 31337;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const PanelCard(
+        PanelCard(
           child: Text(
-            'Deploy writes a demonstration address and transaction hash. It does not broadcast, sign, or verify on an explorer.',
-            style: TextStyle(color: AcColors.amber),
+            deployment != null && deployment.live
+                ? public
+                    ? 'Last broadcast was ${deployment.network} at ${deployment.explorerUrl} (chainId ${deployment.chainId}). ${deployment.note ?? ''}'
+                    : 'Last broadcast was local Anvil at ${deployment.explorerUrl} (chainId ${deployment.chainId}). ${deployment.note ?? ''} Live verification is local bytecode matching.'
+                : 'Local Anvil stays on this machine. Broadcast to ${state.selectedChain} is a real public transaction on that network. The app never stores a private key.',
+            style: TextStyle(color: deployment?.live == true ? AcColors.emerald : AcColors.amber),
           ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          state.publicBroadcastReady
+              ? 'Each header network has its own HTTPS RPC. Broadcast uses the selected chain. Mainnet names spend real funds when the server mainnet flag is on.'
+              : 'Each header network can broadcast once a throwaway deployer key and ALLOW_PUBLIC_BROADCAST=true are set in the server env file.',
+          style: const TextStyle(color: AcColors.muted, fontSize: 12),
+        ),
+        if (state.publicDeployerAddress != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Fund ${state.publicDeployerAddress} on ${state.selectedChain} before a public broadcast.',
+            style: const TextStyle(color: AcColors.muted, fontSize: 12, fontFamily: 'Consolas'),
+          ),
+        ],
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final chain in supportedChains)
-              AcButton(
-                label: 'Record ${chain.name}',
-                busy: state.deploying,
-                primary: chain.name == state.selectedChain,
-                onPressed: () => state.deploy(chain.name),
-              ),
-          ],
+        AcButton(
+          label: state.deploying ? 'Broadcasting to Anvil' : 'Broadcast to local Anvil',
+          icon: Icons.rocket_launch_outlined,
+          primary: true,
+          busy: state.deploying,
+          onPressed: () => state.deploy(state.selectedChain),
+        ),
+        const SizedBox(height: 8),
+        AcButton(
+          label: state.deploying ? 'Broadcasting to ${state.selectedChain}' : 'Broadcast to ${state.selectedChain}',
+          icon: Icons.public_outlined,
+          busy: state.deploying,
+          onPressed: () => state.deploy(state.selectedChain, broadcastPublic: true),
+        ),
+        const SizedBox(height: 8),
+        AcButton(
+          label: state.verifying
+              ? 'Matching bytecode'
+              : public
+                  ? 'Verify on ${deployment!.network}'
+                  : 'Verify bytecode on Anvil',
+          icon: Icons.verified_outlined,
+          busy: state.verifying,
+          onPressed: deployment == null ? null : () => state.verify(),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Selected: ${state.selectedChain}. Anvil is chain 31337. Public broadcast is a real transaction on the selected network.',
+          style: const TextStyle(color: AcColors.muted, fontSize: 12),
         ),
         const SizedBox(height: 16),
         if (deployment == null)
@@ -592,14 +642,39 @@ class DeployWorkspace extends StatelessWidget {
               children: [
                 Text(deployment.contractName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                StatusChip(label: deployment.network),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    StatusChip(
+                      label: deployment.live
+                          ? (public ? 'live ${deployment.network}' : 'live Anvil')
+                          : 'simulated',
+                      color: deployment.live ? AcColors.emerald : AcColors.amber,
+                    ),
+                    StatusChip(label: 'chainId ${deployment.chainId}'),
+                    StatusChip(label: deployment.network),
+                    StatusChip(
+                      label: deployment.verificationStatus,
+                      color: deployment.verificationStatus == 'verified'
+                          ? AcColors.emerald
+                          : deployment.verificationStatus == 'failed'
+                              ? AcColors.rose
+                              : AcColors.amber,
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 _kv('Address', deployment.contractAddress),
                 _kv('Tx', deployment.transactionHash),
                 _kv('Block', '${deployment.blockNumber}'),
                 _kv('Gas', deployment.gasUsed),
                 _kv('Verification', deployment.verificationStatus),
-                _kv('Explorer', deployment.explorerUrl),
+                _kv('Verify engine', deployment.verificationEngine),
+                _kv(public ? 'Explorer' : 'RPC', deployment.explorerUrl),
+                if (deployment.verificationNote != null && deployment.verificationNote!.isNotEmpty)
+                  _kv('Verify note', deployment.verificationNote!),
+                if (deployment.note != null && deployment.note!.isNotEmpty) _kv('Note', deployment.note!),
               ],
             ),
           ),
@@ -639,7 +714,10 @@ class BotsWorkspace extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       children: [
         const PanelCard(
-          child: Text('Bots are persisted configurations, not long-running WebSocket blockchain processes.', style: TextStyle(color: AcColors.amber)),
+          child: Text(
+            'Keepers subscribe to local Anvil (WebSocket when available, otherwise HTTP log poll). They do not watch public RPCs. Pause is an explicit Anvil probe, not an automatic circuit-breaker broadcast.',
+            style: TextStyle(color: AcColors.amber),
+          ),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -652,7 +730,7 @@ class BotsWorkspace extends StatelessWidget {
                 icon: Icons.smart_toy_outlined,
                 onPressed: () => state.createBot(item.$1, item.$2),
               ),
-            AcButton(label: 'Simulate anomaly', icon: Icons.warning_amber, onPressed: state.triggerAnomaly),
+            AcButton(label: 'Probe pause on Anvil', icon: Icons.bolt, onPressed: state.probeKeepers),
           ],
         ),
         const SizedBox(height: 12),
@@ -669,17 +747,24 @@ class BotsWorkspace extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(child: Text(bot.name, style: const TextStyle(fontWeight: FontWeight.w700))),
-                        StatusChip(label: bot.status, color: AcColors.emerald),
+                        StatusChip(
+                          label: bot.live ? 'live ${bot.transport ?? bot.engine}' : bot.status,
+                          color: bot.live ? AcColors.emerald : AcColors.amber,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text('${bot.botType} • ${bot.network}', style: const TextStyle(color: AcColors.muted)),
+                    Text('${bot.botType} • tag ${bot.network} • Anvil 31337', style: const TextStyle(color: AcColors.muted)),
                     Text(bot.triggerCondition, style: const TextStyle(color: AcColors.muted)),
                     const SizedBox(height: 6),
                     Text('Events ${bot.eventsCaptured} • Alerts ${bot.alertsFired}', style: const TextStyle(color: AcColors.cyan)),
+                    if (bot.note != null && bot.note!.isNotEmpty)
+                      Text(bot.note!, style: const TextStyle(fontSize: 12, color: AcColors.muted)),
                     if (bot.logs.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(bot.logs.first.message, style: const TextStyle(fontSize: 12, color: AcColors.muted)),
+                      ...bot.logs.take(3).map(
+                            (log) => Text('${log.level}: ${log.message}', style: const TextStyle(fontSize: 12, color: AcColors.muted)),
+                          ),
                     ],
                   ],
                 ),
@@ -695,9 +780,18 @@ class TelemetryWorkspace extends StatelessWidget {
   const TelemetryWorkspace({super.key, required this.state});
   final CommandCenterState state;
 
+  Color _probeColor(String status) {
+    if (status == 'ok' || status == 'live') return AcColors.emerald;
+    if (status == 'not_installed' || status == 'not_deployed' || status == 'not_configured') return AcColors.amber;
+    return AcColors.rose;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final snapshot = state.telemetry;
     final traces = state.current?.traces ?? const <AgentTraceItem>[];
+    final host = snapshot?.host;
+    final uptime = host == null ? '—' : (host.uptimeSeconds >= 60 ? '${(host.uptimeSeconds / 60).toStringAsFixed(1)} min' : '${host.uptimeSeconds.toStringAsFixed(0)} s');
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -706,18 +800,57 @@ class TelemetryWorkspace extends StatelessWidget {
           runSpacing: 8,
           children: [
             SizedBox(width: 180, child: MetricTile(label: 'API', value: state.apiOnline ? 'online' : 'offline', color: state.apiOnline ? AcColors.emerald : AcColors.rose)),
-            SizedBox(width: 220, child: MetricTile(label: 'Base URL', value: state.apiBase, color: AcColors.blue)),
-            SizedBox(width: 160, child: MetricTile(label: 'Traces', value: '${traces.length}')),
+            SizedBox(width: 160, child: MetricTile(label: 'Telemetry', value: snapshot == null ? 'idle' : (snapshot.live ? 'live' : 'degraded'), color: snapshot?.live == true ? AcColors.emerald : AcColors.amber)),
+            SizedBox(width: 160, child: MetricTile(label: 'Uptime', value: uptime)),
+            SizedBox(width: 160, child: MetricTile(label: 'CPU cores', value: host == null ? '—' : '${host.cpuCount}')),
+            SizedBox(width: 180, child: MetricTile(label: 'Memory', value: host?.memoryUsedPercent == null ? '—' : '${host!.memoryUsedPercent}%', color: AcColors.indigo)),
           ],
         ),
         const SizedBox(height: 12),
-        const PanelCard(
+        PanelCard(
           child: Text(
-            'Oracle Cloud, OpenTelemetry exporters, Redis workers, and live toolchain probes are not deployed yet.',
-            style: TextStyle(color: AcColors.muted),
+            snapshot?.note ?? 'Local process telemetry for this command center.',
+            style: const TextStyle(color: AcColors.muted),
           ),
         ),
+        if (host != null) ...[
+          const SizedBox(height: 12),
+          PanelCard(
+            child: Text(
+              '${host.system} ${host.release} • ${host.hostname} • pid ${host.pid}',
+              style: const TextStyle(fontFamily: 'Consolas', fontSize: 12, color: Color(0xFFCBD5E1)),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: (snapshot?.probes.entries.toList() ?? const <MapEntry<String, String>>[])
+              .where((entry) => const {'database', 'foundry', 'anvil', 'slither', 'keeper', 'walletAuth'}.contains(entry.key))
+              .map((entry) => StatusChip(label: '${entry.key} ${entry.value}', color: _probeColor(entry.value)))
+              .toList(),
+        ),
+        const SizedBox(height: 12),
+        const SectionLabel('Request log'),
+        const SizedBox(height: 8),
+        if (snapshot == null || snapshot.requestLogs.isEmpty)
+          const PanelCard(child: Text('No local request logs yet. Run the pipeline or refresh after API calls.', style: TextStyle(color: AcColors.muted)))
+        else
+          ...snapshot.requestLogs.map(
+            (log) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: PanelCard(
+                child: Text(
+                  '[${log.createdAt}] ${log.method} ${log.path} ${log.statusCode} (${log.latencyMs}ms) ${log.correlationId}',
+                  style: const TextStyle(fontFamily: 'Consolas', fontSize: 12, color: Color(0xFFCBD5E1)),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        const SectionLabel('Agent traces'),
+        const SizedBox(height: 8),
         ...traces.map(
           (trace) => Padding(
             padding: const EdgeInsets.only(bottom: 8),

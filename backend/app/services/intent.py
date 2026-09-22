@@ -16,6 +16,7 @@ from app.models.schemas import (
     StateVariable,
     SupportedChain,
 )
+from app.services.planner import ALLOWED_STANDARDS, run_llm_planner
 
 ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000"
 PAUSER_ROLE = "0x65d7884672e2887e2f437f649bcb0f466fe604e0e60742dff9a0e3c96c103b70"
@@ -30,6 +31,7 @@ def parse_natural_language_intent(
     user_prompt: str,
     target_chain: SupportedChain = "Base",
     contract_name_override: Optional[str] = None,
+    llm_plan: Optional[dict] = None,
 ) -> dict:
     prompt_lower = user_prompt.lower()
     standard = "CUSTOM"
@@ -69,6 +71,15 @@ def parse_natural_language_intent(
         name = contract_name_override or "AgentiToken"
         title = "Standard ERC20 Token with Permit"
 
+    if llm_plan:
+        plan_standard = str(llm_plan.get("standard") or "").upper()
+        if plan_standard in ALLOWED_STANDARDS:
+            standard = plan_standard
+        if llm_plan.get("contractName") and not contract_name_override:
+            name = str(llm_plan["contractName"])
+        if llm_plan.get("title"):
+            title = str(llm_plan["title"])
+
     has_pause = any(token in prompt_lower for token in ("pause", "circuit breaker", "emergency stop"))
     has_timelock = any(token in prompt_lower for token in ("timelock", "delay", "queue"))
     has_oracle = any(token in prompt_lower for token in ("oracle", "chainlink", "price feed", "twap"))
@@ -77,6 +88,12 @@ def parse_natural_language_intent(
         "ERC4626",
         "GOVERNOR",
     }
+    if llm_plan:
+        has_pause = has_pause or bool(llm_plan.get("pausable"))
+        has_timelock = has_timelock or bool(llm_plan.get("timelock"))
+        has_oracle = has_oracle or bool(llm_plan.get("oracle"))
+        has_fee = has_fee or bool(llm_plan.get("fee"))
+        has_access = has_access or bool(llm_plan.get("accessControl"))
 
     roles = [
         RoleSpec(
@@ -230,8 +247,7 @@ def parse_natural_language_intent(
         "confidence": 0.96,
         "detectedStandard": standard,
         "reasoning": (
-            f"Identified user intention for {title} on {target_chain}. "
-            "Activated OpenZeppelin v5.0 primitives, custom gas-optimized error definitions, and rigid formal invariants."
+            f"Identified {title} on {target_chain}."
         ),
         "suggestedInvariants": [
             "Total pool reserves >= total minted claims",
@@ -239,3 +255,15 @@ def parse_natural_language_intent(
             "Timelock enforcement on privileged administrative functions",
         ],
     }
+
+
+def parse_intent_with_planner(
+    user_prompt: str,
+    target_chain: SupportedChain = "Base",
+    contract_name_override: Optional[str] = None,
+) -> dict:
+    plan, llm_meta = run_llm_planner(user_prompt, target_chain)
+    parsed = parse_natural_language_intent(user_prompt, target_chain, contract_name_override, plan)
+    parsed["llmPlanner"] = llm_meta
+    parsed["confidence"] = 0.98 if plan else parsed.get("confidence", 0.96)
+    return parsed

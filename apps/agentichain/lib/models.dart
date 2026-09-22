@@ -16,18 +16,163 @@ class ChainConfig {
   final String icon;
 }
 
+const testnetChainNames = {'Base Sepolia', 'Sepolia', 'Arbitrum Sepolia', 'Optimism Sepolia'};
+
+String chainForBroadcast(String? projectChain) {
+  if (projectChain != null && testnetChainNames.contains(projectChain)) return projectChain;
+  return 'Base Sepolia';
+}
+
 const supportedChains = <ChainConfig>[
   ChainConfig(name: 'Base', chainId: 8453, rpcUrl: 'https://mainnet.base.org', explorerUrl: 'https://basescan.org', nativeCurrency: 'ETH', icon: '🔵'),
   ChainConfig(name: 'Base Sepolia', chainId: 84532, rpcUrl: 'https://sepolia.base.org', explorerUrl: 'https://sepolia.basescan.org', nativeCurrency: 'ETH', icon: '🔷'),
-  ChainConfig(name: 'Ethereum', chainId: 1, rpcUrl: 'https://eth.llamarpc.com', explorerUrl: 'https://etherscan.io', nativeCurrency: 'ETH', icon: '⟠'),
+  ChainConfig(name: 'Ethereum', chainId: 1, rpcUrl: 'https://cloudflare-eth.com', explorerUrl: 'https://etherscan.io', nativeCurrency: 'ETH', icon: '⟠'),
   ChainConfig(name: 'Sepolia', chainId: 11155111, rpcUrl: 'https://rpc.sepolia.org', explorerUrl: 'https://sepolia.etherscan.io', nativeCurrency: 'SEP', icon: '🧪'),
   ChainConfig(name: 'Arbitrum One', chainId: 42161, rpcUrl: 'https://arb1.arbitrum.io/rpc', explorerUrl: 'https://arbiscan.io', nativeCurrency: 'ETH', icon: '🟦'),
   ChainConfig(name: 'Arbitrum Sepolia', chainId: 421614, rpcUrl: 'https://sepolia-rollup.arbitrum.io/rpc', explorerUrl: 'https://sepolia.arbiscan.io', nativeCurrency: 'ETH', icon: '🔹'),
   ChainConfig(name: 'Optimism', chainId: 10, rpcUrl: 'https://mainnet.optimism.io', explorerUrl: 'https://optimistic.etherscan.io', nativeCurrency: 'ETH', icon: '🔴'),
+  ChainConfig(name: 'Optimism Sepolia', chainId: 11155420, rpcUrl: 'https://sepolia.optimism.io', explorerUrl: 'https://sepolia-optimism.etherscan.io', nativeCurrency: 'ETH', icon: '🟥'),
   ChainConfig(name: 'Polygon', chainId: 137, rpcUrl: 'https://polygon-rpc.com', explorerUrl: 'https://polygonscan.com', nativeCurrency: 'POL', icon: '💜'),
   ChainConfig(name: 'Avalanche', chainId: 43114, rpcUrl: 'https://api.avax.network/ext/bc/C/rpc', explorerUrl: 'https://snowtrace.io', nativeCurrency: 'AVAX', icon: '🔺'),
   ChainConfig(name: 'BNB Chain', chainId: 56, rpcUrl: 'https://bsc-dataseed.binance.org', explorerUrl: 'https://bscscan.com', nativeCurrency: 'BNB', icon: '🟡'),
 ];
+
+class WalletSession {
+  const WalletSession({
+    required this.token,
+    required this.address,
+    required this.chainId,
+    required this.method,
+    required this.expiresAt,
+    required this.rpc,
+    this.note,
+  });
+
+  final String token;
+  final String address;
+  final int chainId;
+  final String method;
+  final String expiresAt;
+  final String rpc;
+  final String? note;
+
+  String get shortAddress => address.length < 12 ? address : '${address.substring(0, 6)}…${address.substring(address.length - 4)}';
+
+  factory WalletSession.fromJson(Map<String, dynamic> json) => WalletSession(
+        token: _asString(json['token']),
+        address: _asString(json['address']),
+        chainId: _asInt(json['chainId'], 31337),
+        method: _asString(json['method'], 'anvil'),
+        expiresAt: _asString(json['expiresAt']),
+        rpc: _asString(json['rpc']),
+        note: json['note']?.toString(),
+      );
+}
+
+class TelemetryHost {
+  const TelemetryHost({
+    required this.hostname,
+    required this.system,
+    required this.release,
+    required this.python,
+    required this.pid,
+    required this.cpuCount,
+    required this.uptimeSeconds,
+    this.memoryUsedPercent,
+    this.note,
+  });
+
+  final String hostname;
+  final String system;
+  final String release;
+  final String python;
+  final int pid;
+  final int cpuCount;
+  final double uptimeSeconds;
+  final int? memoryUsedPercent;
+  final String? note;
+
+  factory TelemetryHost.fromJson(Map<String, dynamic> json) {
+    final memory = _asMap(json['memory']);
+    return TelemetryHost(
+      hostname: _asString(json['hostname']),
+      system: _asString(json['system']),
+      release: _asString(json['release']),
+      python: _asString(json['python']),
+      pid: _asInt(json['pid']),
+      cpuCount: _asInt(json['cpuCount'], 1),
+      uptimeSeconds: _asDouble(json['uptimeSeconds']),
+      memoryUsedPercent: memory['usedPercent'] == null ? null : _asInt(memory['usedPercent']),
+      note: json['note']?.toString(),
+    );
+  }
+}
+
+class TelemetryLog {
+  const TelemetryLog({
+    required this.id,
+    required this.correlationId,
+    required this.method,
+    required this.path,
+    required this.statusCode,
+    required this.latencyMs,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String correlationId;
+  final String method;
+  final String path;
+  final int statusCode;
+  final int latencyMs;
+  final String createdAt;
+
+  factory TelemetryLog.fromJson(Map<String, dynamic> json) => TelemetryLog(
+        id: _asString(json['id']),
+        correlationId: _asString(json['correlationId']),
+        method: _asString(json['method']),
+        path: _asString(json['path']),
+        statusCode: _asInt(json['statusCode']),
+        latencyMs: _asInt(json['latencyMs']),
+        createdAt: _asString(json['createdAt']),
+      );
+}
+
+class TelemetrySnapshot {
+  const TelemetrySnapshot({
+    required this.live,
+    required this.engine,
+    required this.probes,
+    required this.host,
+    required this.requestLogs,
+    required this.redisStatus,
+    this.note,
+    this.integrations = const {},
+  });
+
+  final bool live;
+  final String engine;
+  final Map<String, String> probes;
+  final TelemetryHost host;
+  final List<TelemetryLog> requestLogs;
+  final String redisStatus;
+  final String? note;
+  final Map<String, dynamic> integrations;
+
+  factory TelemetrySnapshot.fromJson(Map<String, dynamic> json) {
+    final probesRaw = json['probes'] is Map ? Map<String, dynamic>.from(json['probes'] as Map) : <String, dynamic>{};
+    return TelemetrySnapshot(
+      live: _asBool(json['live']),
+      engine: _asString(json['engine'], 'local_probes'),
+      probes: probesRaw.map((key, value) => MapEntry(key, '$value')),
+      host: TelemetryHost.fromJson(_asMap(json['host'])),
+      requestLogs: _asList(json['requestLogs']).map((item) => TelemetryLog.fromJson(_asMap(item))).toList(),
+      redisStatus: _asString(_asMap(json['redis'])['status'], probesRaw['redis']?.toString() ?? 'not_installed'),
+      note: json['note']?.toString(),
+      integrations: json['integrations'] is Map ? Map<String, dynamic>.from(json['integrations'] as Map) : <String, dynamic>{},
+    );
+  }
+}
 
 class AgentProfile {
   const AgentProfile(this.role, this.avatar, this.badge, this.description);
@@ -38,13 +183,17 @@ class AgentProfile {
 }
 
 const agentProfiles = <AgentProfile>[
-  AgentProfile('Protocol Architect', '🏛️', 'System Architecture', 'Designs modular smart contract blueprints and OpenZeppelin v5 compliance.'),
+  AgentProfile('Protocol Architect', '🏛️', 'System Architecture', 'Designs modular smart contract blueprints and access-control patterns.'),
   AgentProfile('Lead Solidity Engineer', '⚡', 'Solidity 0.8.24', 'Implements gas-efficient contracts with NatSpec and strict storage layout.'),
-  AgentProfile('Security Auditor', '🛡️', 'Slither & Static Analysis', 'Pattern-based SWC/CWE scan until live Slither is wired.'),
-  AgentProfile('Foundry Test Engineer', '🧪', 'Forge & Invariant Testing', 'Builds Foundry suites. Live forge output is not enabled yet.'),
+  AgentProfile('Security Auditor', '🛡️', 'Static Analysis', 'Runs the live local auditor plus the pattern scanner.'),
+  AgentProfile('Foundry Test Engineer', '🧪', 'Forge & Invariant Testing', 'Runs live forge build/test on generated sources.'),
   AgentProfile('Gas Optimizer', '⛽', 'Opcode & Storage Optimization', 'Reports storage packing and custom-error gas savings.'),
-  AgentProfile('Multi-Chain Deployer', '🚀', 'EVM Deployer & Verifier', 'Assembles deployment records. Broadcast is not live.'),
-  AgentProfile('Autonomous Keeper Bot', '🤖', 'On-Chain Watcher', 'Persists bot configs. WebSocket watchers are not live yet.'),
+  AgentProfile('Multi-Chain Deployer', '🚀', 'EVM Deployer & Verifier', 'Broadcasts to local Anvil 31337 and matches runtime bytecode locally. Public explorers are not submitted.'),
+  AgentProfile('Autonomous Keeper Bot', '🤖', 'On-Chain Watcher', 'Watches local Anvil over WebSocket or HTTP poll. Public RPCs and auto-pause are not live.'),
+  AgentProfile('Foundry Test Engineer', '🧪', 'Forge & Invariant Testing', 'Runs live forge build/test on generated sources.'),
+  AgentProfile('Gas Optimizer', '⛽', 'Opcode & Storage Optimization', 'Reports storage packing and custom-error gas savings.'),
+  AgentProfile('Multi-Chain Deployer', '🚀', 'EVM Deployer & Verifier', 'Broadcasts to local Anvil 31337 and matches runtime bytecode locally. Public explorers are not submitted.'),
+  AgentProfile('Autonomous Keeper Bot', '🤖', 'On-Chain Watcher', 'Watches local Anvil over WebSocket or HTTP poll. Public RPCs and auto-pause are not live.'),
 ];
 
 int _asInt(dynamic value, [int fallback = 0]) {
@@ -312,6 +461,9 @@ class SecurityAuditReport {
     required this.isPatched,
     required this.vulnerabilities,
     required this.createdAt,
+    this.live = false,
+    this.engine = 'pattern',
+    this.slitherVersion,
   });
 
   final String id;
@@ -328,6 +480,9 @@ class SecurityAuditReport {
   final bool isPatched;
   final List<VulnerabilityItem> vulnerabilities;
   final String createdAt;
+  final bool live;
+  final String engine;
+  final String? slitherVersion;
 
   factory SecurityAuditReport.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const {};
@@ -346,6 +501,9 @@ class SecurityAuditReport {
       isPatched: _asBool(map['isPatched']),
       vulnerabilities: _asList(map['vulnerabilities']).map((item) => VulnerabilityItem.fromJson(_asMap(item))).toList(),
       createdAt: _asString(map['createdAt']),
+      live: _asBool(map['live']),
+      engine: _asString(map['engine'], 'pattern'),
+      slitherVersion: map['slitherVersion']?.toString(),
     );
   }
 }
@@ -486,6 +644,12 @@ class DeploymentRecord {
     required this.explorerUrl,
     required this.createdAt,
     this.simulated = true,
+    this.live = false,
+    this.engine = 'fixture',
+    this.deploymentTarget = 'simulated',
+    this.verificationEngine = 'none',
+    this.verificationNote,
+    this.note,
   });
 
   final String id;
@@ -502,6 +666,12 @@ class DeploymentRecord {
   final String explorerUrl;
   final String createdAt;
   final bool simulated;
+  final bool live;
+  final String engine;
+  final String deploymentTarget;
+  final String verificationEngine;
+  final String? verificationNote;
+  final String? note;
 
   factory DeploymentRecord.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const {};
@@ -520,6 +690,12 @@ class DeploymentRecord {
       explorerUrl: _asString(map['explorerUrl']),
       createdAt: _asString(map['createdAt']),
       simulated: _asBool(map['simulated'], true),
+      live: _asBool(map['live']),
+      engine: _asString(map['engine'], 'fixture'),
+      deploymentTarget: _asString(map['deploymentTarget'], 'simulated'),
+      verificationEngine: _asString(map['verificationEngine'], 'none'),
+      verificationNote: map['verificationNote']?.toString(),
+      note: map['note']?.toString(),
     );
   }
 }
@@ -555,6 +731,10 @@ class MonitoringBotRecord {
     required this.logs,
     required this.createdAt,
     this.deploymentId,
+    this.live = false,
+    this.engine = 'fixture',
+    this.transport,
+    this.note,
   });
 
   final String id;
@@ -573,8 +753,12 @@ class MonitoringBotRecord {
   final int alertsFired;
   final List<BotLog> logs;
   final String createdAt;
+  final bool live;
+  final String engine;
+  final String? transport;
+  final String? note;
 
-  MonitoringBotRecord copyWith({int? alertsFired, List<BotLog>? logs, String? status}) => MonitoringBotRecord(
+  MonitoringBotRecord copyWith({int? alertsFired, int? eventsCaptured, List<BotLog>? logs, String? status, bool? live}) => MonitoringBotRecord(
         id: id,
         projectId: projectId,
         deploymentId: deploymentId,
@@ -587,10 +771,14 @@ class MonitoringBotRecord {
         actionType: actionType,
         status: status ?? this.status,
         lastCheckedAt: lastCheckedAt,
-        eventsCaptured: eventsCaptured,
+        eventsCaptured: eventsCaptured ?? this.eventsCaptured,
         alertsFired: alertsFired ?? this.alertsFired,
         logs: logs ?? this.logs,
         createdAt: createdAt,
+        live: live ?? this.live,
+        engine: engine,
+        transport: transport,
+        note: note,
       );
 
   factory MonitoringBotRecord.fromJson(Map<String, dynamic> json) => MonitoringBotRecord(
@@ -610,6 +798,10 @@ class MonitoringBotRecord {
         alertsFired: _asInt(json['alertsFired']),
         logs: _asList(json['logs']).map((item) => BotLog.fromJson(_asMap(item))).toList(),
         createdAt: _asString(json['createdAt']),
+        live: _asBool(json['live']),
+        engine: _asString(json['engine'], 'fixture'),
+        transport: json['transport']?.toString(),
+        note: json['note']?.toString(),
       );
 }
 
@@ -672,6 +864,11 @@ class ProjectDetail {
     this.simulation,
     this.deployment,
     this.simulated = true,
+    this.orchestrationEngine = 'linear',
+    this.langgraphVersion,
+    this.nodePath = const [],
+    this.llmPlanner = false,
+    this.llmPlannerStatus,
   });
 
   final String id;
@@ -691,6 +888,11 @@ class ProjectDetail {
   final String createdAt;
   final String updatedAt;
   final bool simulated;
+  final String orchestrationEngine;
+  final String? langgraphVersion;
+  final List<String> nodePath;
+  final bool llmPlanner;
+  final String? llmPlannerStatus;
 
   ProjectDetail copyWith({
     String? targetChain,
@@ -720,6 +922,11 @@ class ProjectDetail {
         createdAt: createdAt,
         updatedAt: updatedAt,
         simulated: simulated,
+        orchestrationEngine: orchestrationEngine,
+        langgraphVersion: langgraphVersion,
+        nodePath: nodePath,
+        llmPlanner: llmPlanner,
+        llmPlannerStatus: llmPlannerStatus,
       );
 
   factory ProjectDetail.fromJson(Map<String, dynamic> json) => ProjectDetail(
@@ -740,6 +947,11 @@ class ProjectDetail {
         createdAt: _asString(json['createdAt']),
         updatedAt: _asString(json['updatedAt']),
         simulated: _asBool(json['simulated'], true),
+        orchestrationEngine: _asString(json['orchestrationEngine'], 'linear'),
+        langgraphVersion: json['langgraphVersion']?.toString(),
+        nodePath: _asList(json['nodePath']).map((item) => item.toString()).toList(),
+        llmPlanner: _asBool(json['llmPlanner']),
+        llmPlannerStatus: json['llmPlannerStatus']?.toString(),
       );
 }
 

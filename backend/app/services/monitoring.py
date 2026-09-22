@@ -1,4 +1,3 @@
-import random
 from datetime import datetime, timezone
 
 from app.models.schemas import BotLog, MonitoringBotRecord
@@ -12,19 +11,19 @@ BOT_NAMES = {
 }
 
 TARGET_EVENTS = {
-    "event_watcher": "All Emitted Protocol Events",
-    "tvl_monitor": "Deposit(address,address,uint256,uint256) | Withdraw(address,address,address,uint256,uint256)",
-    "gas_spike_alert": "Mempool Pending Transactions (Gas > 150 Gwei)",
-    "health_keeper": "EpochHarvestNeeded() | RebalanceTriggered()",
-    "circuit_breaker": "OracleAnomalyDetected() | HighSeverityInvariantRevert()",
+    "event_watcher": "All contract logs on local Anvil",
+    "tvl_monitor": "Deposit / Withdraw logs on the local vault",
+    "gas_spike_alert": "Local Anvil newHeads (not a public mempool)",
+    "health_keeper": "paused() eth_call on local Anvil",
+    "circuit_breaker": "Local contract logs; pause is explicit probe only",
 }
 
 TRIGGERS = {
-    "event_watcher": "Continuous real-time block streaming via RPC WebSocket",
-    "tvl_monitor": "Outflow > 100,000 USD OR single block TVL delta > 12%",
-    "gas_spike_alert": "Gas fee spike > 200% above 24h rolling median",
-    "health_keeper": "Harvest delta > 6 hours OR unharvested yield > $500",
-    "circuit_breaker": "Oracle spot divergence > 3.0% from TWAP secondary feed",
+    "event_watcher": "eth_subscribe logs on ws://127.0.0.1:8545, HTTP poll fallback",
+    "tvl_monitor": "Local vault log on Anvil. Not a USD price feed.",
+    "gas_spike_alert": "Anvil newHeads. Public gas oracles are not used.",
+    "health_keeper": "paused() every few local blocks",
+    "circuit_breaker": "Local log capture. Auto-pause is not broadcast.",
 }
 
 ACTIONS = {
@@ -50,7 +49,7 @@ def create_autonomous_bot(
 ) -> MonitoringBotRecord:
     stamp = int(datetime.now(timezone.utc).timestamp() * 1000)
     return MonitoringBotRecord(
-        id=f"bot-{stamp}-{random.randint(0, 999)}",
+        id=f"bot-{stamp}",
         projectId=project_id,
         deploymentId=deployment_id,
         name=name or BOT_NAMES[bot_type],
@@ -62,11 +61,13 @@ def create_autonomous_bot(
         actionType=ACTIONS[bot_type],  # type: ignore[arg-type]
         status="active",
         lastCheckedAt=_now(),
-        eventsCaptured=100 + random.randint(0, 500),
+        eventsCaptured=0,
         alertsFired=0,
         logs=[
-            BotLog(timestamp=_now(), level="INFO", message=f"Autonomous bot initialized and listening to {network} RPC."),
-            BotLog(timestamp=_now(), level="INFO", message=f"Subscribed to filter on address: {contract_address}"),
+            BotLog(timestamp=_now(), level="INFO", message="Keeper config saved. Attaching to local Anvil next."),
         ],
         createdAt=_now(),
+        live=False,
+        engine="anvil_keeper",
+        note="Will watch local Anvil only. Not a public-chain WebSocket.",
     )

@@ -11,14 +11,17 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="AgentiChain">
   <title>AgentiChain</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="manifest" href="manifest.json">
   <style>
     html, body { height: 100%; margin: 0; background: #070b14; color: #e2e8f0; font-family: Segoe UI, sans-serif; }
-    .boot { display: flex; height: 100%; align-items: center; justify-content: center; }
+    .boot { display: flex; height: 100%; align-items: center; justify-content: center; gap: 16px; }
+    .boot img { width: 72px; height: 72px; border-radius: 16px; }
   </style>
 </head>
 <body>
-  <div class="boot">Loading AgentiChain…</div>
+  <div class="boot"><img src="favicon.png" alt="AgentiChain">Loading AgentiChain…</div>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

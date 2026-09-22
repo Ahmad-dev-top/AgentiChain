@@ -32,6 +32,18 @@ class AuditLogRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class AuthSessionRow(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    address: Mapped[str] = mapped_column(String, index=True)
+    chain_id: Mapped[int] = mapped_column(Integer)
+    method: Mapped[str] = mapped_column(String, default="anvil_personal_sign")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 engine = create_async_engine(settings.database_url, echo=False, future=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

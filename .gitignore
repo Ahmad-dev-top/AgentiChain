@@ -11,6 +11,7 @@ node_modules/
 .next/
 .env
 .env.*
+!env.example
 *.pyc
 backend/.venv/
 apps/agentichain/.dart_tool/

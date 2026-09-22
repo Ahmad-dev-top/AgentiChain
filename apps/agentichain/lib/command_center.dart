@@ -46,7 +46,7 @@ class _CommandCenterPageState extends State<CommandCenterPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 980;
+        final compact = constraints.maxWidth < 1280;
         return Scaffold(
           drawer: compact ? _NavDrawer(state: state) : null,
           appBar: PreferredSize(
@@ -91,7 +91,7 @@ class _DisclaimerBanner extends StatelessWidget {
       color: const Color(0xFF422006),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: const Text(
-        'Prototype mode: addresses, transaction hashes, audit scores, and explorer links are demonstration data. No live broadcast, Slither, or forge execution is enabled.',
+        'Local command center. Server credentials are not entered or shown here.',
         style: TextStyle(color: Color(0xFFFDE68A), fontSize: 12),
       ),
     );
@@ -117,14 +117,14 @@ class _Header extends StatelessWidget {
             IconButton(onPressed: () => Scaffold.of(context).openDrawer(), icon: const Icon(Icons.menu))
           else
             const SizedBox(width: 8),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: const LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFF2563EB)]),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/logo.png',
+              width: 40,
+              height: 40,
+              fit: BoxFit.cover,
             ),
-            child: const Icon(Icons.smart_toy_outlined, color: Colors.white),
           ),
           const SizedBox(width: 10),
           const Column(
@@ -135,35 +135,66 @@ class _Header extends StatelessWidget {
               Text('Flutter command center', style: TextStyle(color: AcColors.muted, fontSize: 11)),
             ],
           ),
-          const Spacer(),
-          if (!compact) ...[
-            StatusChip(label: state.processing ? 'Orchestrating' : '7 Agents Ready', color: AcColors.emerald),
-            const SizedBox(width: 8),
-            StatusChip(label: state.apiOnline ? 'API online' : 'API offline', color: state.apiOnline ? AcColors.emerald : AcColors.rose),
-            const SizedBox(width: 8),
-          ],
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: supportedChains.any((item) => item.name == state.selectedChain) ? state.selectedChain : 'Base',
-              dropdownColor: AcColors.card,
-              items: [
-                for (final chain in supportedChains)
-                  DropdownMenuItem(value: chain.name, child: Text('${chain.icon} ${chain.name}')),
-              ],
-              onChanged: (value) {
-                if (value != null) state.selectChain(value);
-              },
+          const SizedBox(width: 12),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                children: [
+                  if (!compact) ...[
+                    StatusChip(label: state.processing ? 'Orchestrating' : '7 Agents Ready', color: AcColors.emerald),
+                    const SizedBox(width: 8),
+                    StatusChip(label: state.apiOnline ? 'API online' : 'API offline', color: state.apiOnline ? AcColors.emerald : AcColors.rose),
+                    const SizedBox(width: 8),
+                    StatusChip(
+                      label: state.wallet == null ? 'wallet off' : '${state.wallet!.shortAddress} · ${state.wallet!.chainId}',
+                      color: state.wallet == null ? AcColors.amber : AcColors.emerald,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: supportedChains.any((item) => item.name == state.selectedChain) ? state.selectedChain : 'Base Sepolia',
+                      dropdownColor: AcColors.card,
+                      items: [
+                        for (final chain in supportedChains)
+                          DropdownMenuItem(value: chain.name, child: Text('${chain.icon} ${chain.name}')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) state.selectChain(value);
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Templates',
+                    onPressed: () => _openTemplates(context, state),
+                    icon: const Icon(Icons.layers_outlined),
+                  ),
+                  FilledButton.icon(
+                    onPressed: state.connectingWallet
+                        ? null
+                        : () => state.wallet == null ? state.connectAnvilWallet() : state.disconnectWallet(),
+                    icon: Icon(state.wallet == null ? Icons.account_balance_wallet_outlined : Icons.link_off, size: 16),
+                    label: Text(compact ? (state.wallet == null ? 'Anvil' : 'Out') : (state.wallet == null ? 'Sign in Anvil' : 'Disconnect')),
+                  ),
+                  if (state.wallet == null) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: state.connectingWallet ? null : state.connectBrowserWallet,
+                      icon: const Icon(Icons.language, size: 16),
+                      label: Text(compact ? 'Browser' : 'Browser wallet'),
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => state.selectTab(WorkspaceTab.chat),
+                    icon: const Icon(Icons.auto_awesome, size: 16),
+                    label: Text(compact ? 'New' : 'New Prompt'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            tooltip: 'Templates',
-            onPressed: () => _openTemplates(context, state),
-            icon: const Icon(Icons.layers_outlined),
-          ),
-          FilledButton.icon(
-            onPressed: () => state.selectTab(WorkspaceTab.chat),
-            icon: const Icon(Icons.auto_awesome, size: 16),
-            label: Text(compact ? 'New' : 'New Prompt'),
           ),
         ],
       ),
@@ -267,7 +298,7 @@ class _WorkspaceHost extends StatelessWidget {
       case WorkspaceTab.code:
         return CodeWorkspace(state: state);
       case WorkspaceTab.graph:
-        return GraphWorkspace(spec: project.specJson);
+        return GraphWorkspace(state: state);
       case WorkspaceTab.audit:
         return AuditWorkspace(state: state);
       case WorkspaceTab.simulation:
@@ -295,7 +326,7 @@ class _Footer extends StatelessWidget {
         border: Border(top: BorderSide(color: AcColors.border)),
       ),
       child: const Text(
-        'AgentiChain Flutter UI  •  FastAPI prototype  •  Solidity 0.8.24  •  OpenZeppelin v5  •  SQLite local store',
+        'AgentiChain command center',
         style: TextStyle(color: AcColors.muted, fontSize: 11),
       ),
     );

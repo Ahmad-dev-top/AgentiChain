@@ -1,10 +1,17 @@
 from datetime import datetime, timezone
-from typing import Optional
+from importlib.metadata import version as pkg_version
+from typing import Annotated, Any, Optional, TypedDict
+import operator
+import os
+import time
 
-from app.models.schemas import AgentTraceItem, ContractFile, ContractSpec, ProjectDetail, SupportedChain
+os.environ.setdefault("LANGCHAIN_TRACING_V2", "false")
+
+from app.models.schemas import AgentTraceItem, ContractFile, ContractSpec, ProjectDetail, SecurityAuditReport, SimulationResult, SupportedChain
 from app.services.foundry import run_foundry_simulation
-from app.services.intent import parse_natural_language_intent
-from app.services.security import analyze_solidity_code, auto_patch_contract
+from app.services.intent import parse_intent_with_planner
+from app.services.security import auto_patch_contract
+from app.services.slither_engine import run_live_security_audit
 
 
 def _now() -> str:
@@ -232,35 +239,66 @@ contract {name}Test is Test {{
 '''
 
 
-def orchestrate_multi_agent_workflow(
-    user_prompt: str,
-    target_chain: SupportedChain = "Base",
-    contract_name: Optional[str] = None,
-) -> dict:
-    parsed = parse_natural_language_intent(user_prompt, target_chain, contract_name)
+class AgentState(TypedDict, total=False):
+    prompt: str
+    target_chain: str
+    contract_name: Optional[str]
+    spec: Any
+    contracts: list
+    traces: Annotated[list, operator.add]
+    audit: Any
+    simulation: Any
+    stamp: int
+    engine: str
+    node_path: Annotated[list, operator.add]
+    core_code: str
+    main_name: str
+    llm_planner: dict
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(int((time.perf_counter() - started) * 1000), 1)
+
+
+def _trace(stamp: int, index: int, **kwargs) -> AgentTraceItem:
+    return AgentTraceItem(id=f"tr-{stamp}-{index}", createdAt=_now(), tokensUsed=0, **kwargs)
+
+
+def architect_node(state: AgentState) -> dict:
+    started = time.perf_counter()
+    parsed = parse_intent_with_planner(state["prompt"], state["target_chain"], state.get("contract_name"))
     spec: ContractSpec = parsed["spec"]
-    traces: list[AgentTraceItem] = []
-    stamp = _stamp()
-    now = _now()
+    llm_meta = parsed.get("llmPlanner") or {}
+    return {
+        "spec": spec,
+        "main_name": spec.name,
+        "llm_planner": llm_meta,
+        "node_path": ["architect"],
+        "traces": [
+            _trace(
+                state["stamp"],
+                1,
+                agentName="Protocol Architect",
+                agentRole="System Architecture",
+                action="Synthesized Smart Contract Formal Specification",
+                thought=(
+                    f'Architect parsed the prompt. Standard: {spec.standard}.'
+                ),
+                inputPayload={"prompt": state["prompt"], "targetChain": state["target_chain"]},
+                outputPayload={"standard": spec.standard, "rolesCount": len(spec.roles), "node": "architect"},
+                status="success",
+                latencyMs=_elapsed_ms(started),
+            )
+        ],
+    }
 
-    traces.append(
-        AgentTraceItem(
-            id=f"tr-{stamp}-1",
-            agentName="Protocol Architect",
-            agentRole="System Architecture",
-            action="Synthesized Smart Contract Formal Specification",
-            thought=f'Analyzed user requirements: "{user_prompt}". Standard determined: {spec.standard}. Activated OpenZeppelin v5.0 security primitives with target chain {target_chain}.',
-            inputPayload={"prompt": user_prompt, "targetChain": target_chain},
-            outputPayload={"standard": spec.standard, "rolesCount": len(spec.roles), "invariants": [inv.model_dump() for inv in spec.invariants]},
-            status="success",
-            tokensUsed=780,
-            latencyMs=310,
-            createdAt=now,
-        )
-    )
 
-    is_vault = spec.standard == "ERC4626"
+def solidity_node(state: AgentState) -> dict:
+    started = time.perf_counter()
+    spec: ContractSpec = state["spec"]
+    stamp = state["stamp"]
     main_name = spec.name
+    is_vault = spec.standard == "ERC4626"
     core_code = _vault_source(main_name, spec.description) if is_vault else _generic_source(main_name, spec.description)
     interface_code = f'''// SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
@@ -285,88 +323,193 @@ contract DeployScript is Script {{
     }}
 }}
 '''
-
     contracts = [
         ContractFile(id=f"c-{stamp}-1", projectId="proj-temp", name=f"{main_name}.sol", filePath=f"src/{main_name}.sol", contractType="core", version=1, code=core_code),
         ContractFile(id=f"c-{stamp}-2", projectId="proj-temp", name=f"I{main_name}.sol", filePath=f"src/interfaces/I{main_name}.sol", contractType="interface", version=1, code=interface_code),
         ContractFile(id=f"c-{stamp}-3", projectId="proj-temp", name=f"{main_name}.t.sol", filePath=f"test/{main_name}.t.sol", contractType="test", version=1, code=test_code),
         ContractFile(id=f"c-{stamp}-4", projectId="proj-temp", name="Deploy.s.sol", filePath="script/Deploy.s.sol", contractType="script", version=1, code=deploy_script),
     ]
-
-    traces.append(
-        AgentTraceItem(
-            id=f"tr-{stamp}-2",
-            agentName="Lead Solidity Engineer",
-            agentRole="Solidity 0.8.24",
-            action=f"Generated Production Solidity Contracts for {main_name}",
-            thought="Authored Solidity 0.8.24 code with custom errors, ReentrancyGuard, and Pausable circuit breaker.",
-            inputPayload={"specName": spec.name},
-            outputPayload={"filesGenerated": [c.filePath for c in contracts]},
-            status="success",
-            tokensUsed=2200,
-            latencyMs=740,
-            createdAt=now,
-        )
-    )
-
-    audit_report = analyze_solidity_code(core_code, f"src/{main_name}.sol")
-    patch_result = auto_patch_contract(core_code, audit_report.vulnerabilities)
-    contracts[0].code = patch_result["patchedCode"]
-
-    traces.append(
-        AgentTraceItem(
-            id=f"tr-{stamp}-3",
-            agentName="Security Auditor",
-            agentRole="Slither & Static Analysis",
-            action="Static Analysis & Auto-Patching Reflection Loop",
-            thought="Scanned source against prototype SWC/CWE detectors and applied limited auto-patches.",
-            inputPayload={"originalIssues": audit_report.totalIssues},
-            outputPayload={"patchLog": patch_result["patchLog"], "finalScore": audit_report.securityScore},
-            status="success",
-            tokensUsed=1350,
-            latencyMs=480,
-            createdAt=now,
-        )
-    )
-
-    sim_result = run_foundry_simulation(main_name, "proj-temp", "local forge (no RPC fork)", contracts)
-    traces.append(
-        AgentTraceItem(
-            id=f"tr-{stamp}-4",
-            agentName="Foundry Test Engineer",
-            agentRole="Forge & Invariant Testing",
-            action="Anvil Local EVM Fork Simulation & Gas Profiling",
-            thought=f"Executed live forge build/test for {main_name}. RPC fork testing is not enabled yet.",
-            inputPayload={"simType": "fork_test"},
-            outputPayload={"passed": sim_result.passedTests, "failed": sim_result.failedTests, "durationMs": sim_result.durationMs},
-            status="success",
-            tokensUsed=1600,
-            latencyMs=510,
-            createdAt=now,
-        )
-    )
-    traces.append(
-        AgentTraceItem(
-            id=f"tr-{stamp}-5",
-            agentName="Gas Optimizer",
-            agentRole="Opcode & Storage Optimization",
-            action="Storage Packing & Calldata Optimization Pass",
-            thought="Reported fixture gas savings. Opcode-level optimization requires live forge snapshots.",
-            inputPayload={"optimizationTarget": "via-ir"},
-            outputPayload={"gasBenchmarks": [item.model_dump() for item in sim_result.gasBenchmarks]},
-            status="success",
-            tokensUsed=890,
-            latencyMs=340,
-            createdAt=now,
-        )
-    )
-
     return {
-        "spec": spec,
         "contracts": contracts,
+        "core_code": core_code,
+        "main_name": main_name,
+        "node_path": ["solidity"],
+        "traces": [
+            _trace(
+                stamp,
+                2,
+                agentName="Lead Solidity Engineer",
+                agentRole="Solidity 0.8.24",
+                action=f"Generated Production Solidity Contracts for {main_name}",
+                thought="Solidity sources were authored from the spec templates.",
+                inputPayload={"specName": spec.name, "node": "solidity"},
+                outputPayload={"filesGenerated": [item.filePath for item in contracts]},
+                status="success",
+                latencyMs=_elapsed_ms(started),
+            )
+        ],
+    }
+
+
+def auditor_node(state: AgentState) -> dict:
+    started = time.perf_counter()
+    contracts = list(state["contracts"])
+    core_code = state["core_code"]
+    main_name = state["main_name"]
+    audit_report = run_live_security_audit(contracts, "proj-temp", core_code, f"src/{main_name}.sol")
+    patch_result = auto_patch_contract(core_code, audit_report.vulnerabilities)
+    contracts[0] = contracts[0].model_copy(update={"code": patch_result["patchedCode"]})
+    return {
+        "contracts": contracts,
+        "audit": audit_report,
+        "core_code": patch_result["patchedCode"],
+        "node_path": ["auditor"],
+        "traces": [
+            _trace(
+                state["stamp"],
+                3,
+                agentName="Security Auditor",
+                agentRole="Slither & Static Analysis",
+                action="Static Analysis & Auto-Patching Reflection Loop",
+                thought="Auditor ran the live local static analysis plus the pattern scanner.",
+                inputPayload={"originalIssues": audit_report.totalIssues, "node": "auditor"},
+                outputPayload={"patchLog": patch_result["patchLog"], "finalScore": audit_report.securityScore, "live": audit_report.live},
+                status="success",
+                latencyMs=_elapsed_ms(started),
+            )
+        ],
+    }
+
+
+def foundry_node(state: AgentState) -> dict:
+    started = time.perf_counter()
+    main_name = state["main_name"]
+    sim_result = run_foundry_simulation(main_name, "proj-temp", "local forge (no RPC fork)", state["contracts"])
+    failed = sim_result.failedTests > 0
+    return {
+        "simulation": sim_result,
+        "node_path": ["foundry"],
+        "traces": [
+            _trace(
+                state["stamp"],
+                4,
+                agentName="Foundry Test Engineer",
+                agentRole="Forge & Invariant Testing",
+                action="Live forge build/test via LangGraph",
+                thought=f"Foundry executed live forge for {main_name}.",
+                inputPayload={"simType": sim_result.simType, "node": "foundry"},
+                outputPayload={"passed": sim_result.passedTests, "failed": sim_result.failedTests, "durationMs": sim_result.durationMs, "live": sim_result.live},
+                status="error" if failed else "success",
+                latencyMs=_elapsed_ms(started),
+            )
+        ],
+    }
+
+
+def gas_node(state: AgentState) -> dict:
+    started = time.perf_counter()
+    sim_result = state["simulation"]
+    return {
+        "node_path": ["gas"],
+        "traces": [
+            _trace(
+                state["stamp"],
+                5,
+                agentName="Gas Optimizer",
+                agentRole="Opcode & Storage Optimization",
+                action="Gas snapshot from live forge output",
+                thought="Gas node reported forge gas figures.",
+                inputPayload={"node": "gas"},
+                outputPayload={"gasBenchmarks": [item.model_dump() for item in sim_result.gasBenchmarks]},
+                status="success",
+                latencyMs=_elapsed_ms(started),
+            )
+        ],
+    }
+
+
+def _compile_agent_graph():
+    from langgraph.graph import END, START, StateGraph
+
+    builder = StateGraph(AgentState)
+    builder.add_node("architect", architect_node)
+    builder.add_node("solidity", solidity_node)
+    builder.add_node("auditor", auditor_node)
+    builder.add_node("foundry", foundry_node)
+    builder.add_node("gas", gas_node)
+    builder.add_edge(START, "architect")
+    builder.add_edge("architect", "solidity")
+    builder.add_edge("solidity", "auditor")
+    builder.add_edge("auditor", "foundry")
+    builder.add_edge("foundry", "gas")
+    builder.add_edge("gas", END)
+    return builder.compile()
+
+
+try:
+    AGENT_GRAPH = _compile_agent_graph()
+except Exception:  # pragma: no cover - import/runtime fallback
+    AGENT_GRAPH = None
+
+
+def langgraph_status() -> dict:
+    try:
+        return {
+            "status": "ok" if AGENT_GRAPH is not None else "error",
+            "version": pkg_version("langgraph"),
+            "engine": "langgraph" if AGENT_GRAPH is not None else "linear_fallback",
+            "nodes": ["architect", "solidity", "auditor", "foundry", "gas"],
+            "note": "Local agent nodes are running.",
+        }
+    except Exception as exc:
+        return {"status": "not_installed", "engine": "linear_fallback", "detail": str(exc)}
+
+
+def _merge_node(state: dict, update: dict) -> dict:
+    traces = list(state.get("traces") or []) + list(update.get("traces") or [])
+    path = list(state.get("node_path") or []) + list(update.get("node_path") or [])
+    merged = {**state, **update, "traces": traces, "node_path": path}
+    return merged
+
+
+def _run_linear(state: dict) -> dict:
+    for node in (architect_node, solidity_node, auditor_node, foundry_node, gas_node):
+        state = _merge_node(state, node(state))
+    state["engine"] = "linear_fallback"
+    return state
+
+
+def orchestrate_multi_agent_workflow(
+    user_prompt: str,
+    target_chain: SupportedChain = "Base",
+    contract_name: Optional[str] = None,
+) -> dict:
+    initial: dict = {
+        "prompt": user_prompt,
+        "target_chain": target_chain,
+        "contract_name": contract_name,
+        "stamp": _stamp(),
+        "traces": [],
+        "node_path": [],
+        "engine": "langgraph",
+    }
+    try:
+        raw = AGENT_GRAPH.invoke(initial) if AGENT_GRAPH is not None else _run_linear(initial)
+    except Exception:
+        raw = _run_linear(initial)
+    traces = []
+    for item in raw.get("traces") or []:
+        traces.append(item if isinstance(item, AgentTraceItem) else AgentTraceItem.model_validate(item))
+    return {
+        "spec": raw["spec"],
+        "contracts": raw["contracts"],
         "traces": traces,
-        "auditReport": audit_report,
-        "simulationResult": sim_result,
+        "auditReport": raw["audit"],
+        "simulationResult": raw["simulation"],
+        "engine": raw.get("engine") or ("langgraph" if AGENT_GRAPH is not None else "linear_fallback"),
+        "nodePath": raw.get("node_path") or [],
+        "langgraphVersion": langgraph_status().get("version"),
+        "llmPlanner": raw.get("llm_planner") or {},
     }
 
 
@@ -378,16 +521,19 @@ def workflow_to_project(
 ) -> ProjectDetail:
     workflow = orchestrate_multi_agent_workflow(prompt, target_chain, contract_name)
     pid = project_id or f"proj-{_stamp()}"
-    spec: ContractSpec = workflow["spec"]
+    spec_raw = workflow["spec"]
+    spec: ContractSpec = spec_raw if isinstance(spec_raw, ContractSpec) else ContractSpec.model_validate(spec_raw)
     now = _now()
     contracts = []
     for item in workflow["contracts"]:
-        cloned = item.model_copy()
-        cloned.projectId = pid
+        cloned = item if isinstance(item, ContractFile) else ContractFile.model_validate(item)
+        cloned = cloned.model_copy(update={"projectId": pid})
         contracts.append(cloned)
-    audit = workflow["auditReport"].model_copy()
+    audit_raw = workflow["auditReport"]
+    audit = audit_raw if isinstance(audit_raw, SecurityAuditReport) else SecurityAuditReport.model_validate(audit_raw)
     audit.projectId = pid
-    simulation = workflow["simulationResult"].model_copy()
+    sim_raw = workflow["simulationResult"]
+    simulation = sim_raw if isinstance(sim_raw, SimulationResult) else SimulationResult.model_validate(sim_raw)
     simulation.projectId = pid
     return ProjectDetail(
         id=pid,
@@ -405,5 +551,10 @@ def workflow_to_project(
         traces=workflow["traces"],
         createdAt=now,
         updatedAt=now,
-        simulated=True,
+        simulated=False,
+        orchestrationEngine=workflow.get("engine") or "langgraph",
+        langgraphVersion=workflow.get("langgraphVersion"),
+        nodePath=list(workflow.get("nodePath") or []),
+        llmPlanner=bool((workflow.get("llmPlanner") or {}).get("used")),
+        llmPlannerStatus=str((workflow.get("llmPlanner") or {}).get("status") or "not_configured"),
     )

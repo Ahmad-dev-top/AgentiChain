@@ -27,6 +27,7 @@ SupportedChain = Literal[
     "Arbitrum One",
     "Arbitrum Sepolia",
     "Optimism",
+    "Optimism Sepolia",
     "Polygon",
     "Avalanche",
     "BNB Chain",
@@ -200,6 +201,9 @@ class SecurityAuditReport(BaseModel):
     isPatched: bool = False
     vulnerabilities: list[VulnerabilityItem] = Field(default_factory=list)
     createdAt: str
+    live: bool = False
+    engine: str = "pattern"
+    slitherVersion: Optional[str] = None
 
 
 class CallTraceFrame(BaseModel):
@@ -271,6 +275,12 @@ class DeploymentRecord(BaseModel):
     constructorArgs: Optional[Any] = None
     createdAt: str
     simulated: bool = True
+    live: bool = False
+    engine: str = "fixture"
+    deploymentTarget: str = "simulated"
+    verificationEngine: str = "none"
+    verificationNote: Optional[str] = None
+    note: Optional[str] = None
 
 
 class BotLog(BaseModel):
@@ -297,6 +307,10 @@ class MonitoringBotRecord(BaseModel):
     alertsFired: int = 0
     logs: list[BotLog] = Field(default_factory=list)
     createdAt: str
+    live: bool = False
+    engine: str = "fixture"
+    transport: Optional[str] = None
+    note: Optional[str] = None
 
 
 class ContractFile(BaseModel):
@@ -330,6 +344,11 @@ class ProjectDetail(BaseModel):
     createdAt: str
     updatedAt: str
     simulated: bool = True
+    orchestrationEngine: str = "linear"
+    langgraphVersion: Optional[str] = None
+    nodePath: list[str] = Field(default_factory=list)
+    llmPlanner: bool = False
+    llmPlannerStatus: Optional[str] = None
 
 
 class ParseIntentRequest(BaseModel):
@@ -364,6 +383,16 @@ class DeployRequest(BaseModel):
     network: SupportedChain
     constructorArgs: Optional[Any] = None
     code: Optional[str] = None
+    broadcastPublic: bool = False
+
+
+class VerifyRequest(BaseModel):
+    projectId: str
+    contractName: Optional[str] = None
+
+
+class ProbeBotsRequest(BaseModel):
+    projectId: str
 
 
 class CreateBotRequest(BaseModel):
@@ -373,3 +402,25 @@ class CreateBotRequest(BaseModel):
     network: str = "Base"
     deploymentId: Optional[str] = "dep-01"
     name: Optional[str] = None
+
+
+class AuthChallengeRequest(BaseModel):
+    address: Optional[str] = None
+    chainId: Optional[int] = None
+    browser: bool = False
+
+
+class AuthVerifyRequest(BaseModel):
+    address: str
+    nonce: str
+    signature: str
+
+
+class WalletSession(BaseModel):
+    token: str
+    address: str
+    chainId: int
+    method: str
+    expiresAt: str
+    rpc: str
+    note: Optional[str] = None
