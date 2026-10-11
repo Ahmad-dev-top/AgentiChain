@@ -44,6 +44,15 @@ app.add_exception_handler(ApiError, api_error_handler)
 
 
 @app.middleware("http")
+async def private_network_middleware(request: Request, call_next):
+    """Let the GitHub Pages dashboard call this API on the local machine."""
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
+
+@app.middleware("http")
 async def correlation_middleware(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
     request.state.correlation_id = correlation_id

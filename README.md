@@ -8,6 +8,12 @@
   A multi-agent command center that turns a plain-language contract request into Solidity, tests, an audit, a local deployment, and a public testnet broadcast.
 </p>
 
+<p align="center">
+  <a href="https://ahmad-dev-top.github.io/AgentiChain/"><strong>Open the dashboard</strong></a>
+</p>
+
+The dashboard link opens the Flutter command center from GitHub Pages. Synthesis, audit, Foundry, and deploy still run through the API on the same machine, at `http://127.0.0.1:8000`. Start that API before a live demo. If it is not running, the dashboard still opens and shows the API as offline.
+
 AgentiChain is a portfolio product for showing how a smart-contract workflow can be run from one screen. An engineer describes what the contract should do. A small set of agents writes a formal spec, Solidity, Foundry tests, and a deploy script. Slither scores the draft. Foundry runs the tests. The same project can then be deployed to a local Anvil chain or broadcast to a public testnet, with the runtime bytecode checked against what was compiled.
 
 The client-facing path was exercised end to end on this machine: synthesis, formal spec, Solidity, Slither, Foundry, local Anvil deploy and verify, keeper probe, telemetry, and a live Base Sepolia broadcast with explorer verification.
